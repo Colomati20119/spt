@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analizador de historial de Spotify</title>
+<style>
+  :root {
+    --bg: #f5f7f4;
+    --surface: #ffffff;
+    --text: #17211b;
+    --muted: #5d6b62;
+    --line: #d9e0da;
+    --accent: #1a7f4b;
+    --accent-text: #ffffff;
+    --danger: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101512; --surface: #171e19; --text: #e8efe9; --muted: #98a89d;
+      --line: #2a352d; --accent: #3ddc84; --accent-text: #08160d; --danger: #ff8a80;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #101512; --surface: #171e19; --text: #e8efe9; --muted: #98a89d;
+    --line: #2a352d; --accent: #3ddc84; --accent-text: #08160d; --danger: #ff8a80;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  }
+  main { max-width: 1000px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 1.9rem; margin: 0 0 6px; letter-spacing: -0.02em; }
+  h2 { font-size: 1.15rem; margin: 0 0 12px; }
+  p.lead { color: var(--muted); margin: 0 0 24px; max-width: 62ch; }
+
+  #drop {
+    border: 2px dashed var(--line); background: var(--surface); border-radius: 12px;
+    padding: 28px 20px; text-align: center; transition: border-color .15s, background .15s;
+  }
+  #drop.over { border-color: var(--accent); }
+  #drop p { margin: 0 0 14px; color: var(--muted); }
+  .botones { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  button, label.btn {
+    font: inherit; cursor: pointer; border-radius: 8px; padding: 9px 16px;
+    border: 1px solid var(--accent); background: var(--accent); color: var(--accent-text);
+  }
+  button.sec, label.btn.sec { background: transparent; color: var(--accent); }
+  button:focus-visible, label.btn:focus-within, select:focus-visible {
+    outline: 3px solid var(--accent); outline-offset: 2px;
+  }
+  input[type=file] { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  #estado { margin-top: 14px; min-height: 1.4em; color: var(--muted); }
+  #estado.error { color: var(--danger); }
+  .privacidad { font-size: .9rem; color: var(--muted); margin-top: 10px; }
+
+  #resultados { display: none; margin-top: 32px; }
+  section { margin-bottom: 36px; }
+  .tabla-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; min-width: 360px; }
+  th, td { padding: 9px 14px; text-align: left; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; color: var(--muted); font-size: .9rem; background: var(--bg); }
+  tr:last-child td { border-bottom: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.pos, th.pos { width: 3rem; color: var(--muted); }
+  tfoot td { font-weight: 600; }
+  .fila-anio { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  .fila-anio h2 { margin: 0; }
+  select {
+    font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--surface); color: var(--text);
+  }
+  .dos-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 760px) { .dos-col { grid-template-columns: 1fr; } }
+  .dos-col h3 { font-size: 1rem; margin: 0 0 8px; }
+  .vacio { color: var(--muted); padding: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Analizador de historial de Spotify</h1>
+  <p class="lead">Subí los archivos JSON de tu historial completo (los de “Streaming_History_Audio_2021.json”, etc.) y mirá tus artistas y canciones más escuchados.</p>
+
+  <div id="drop">
+    <p>Arrastrá acá tus archivos .json o .txt, o elegilos manualmente.</p>
+    <div class="botones">
+      <label class="btn">Elegir archivos<input type="file" id="archivos" accept=".json,.txt" multiple></label>
+      <label class="btn sec">Elegir carpeta<input type="file" id="carpeta" webkitdirectory multiple></label>
+    </div>
+    <div id="estado" role="status" aria-live="polite"></div>
+    <div class="privacidad">Todo se procesa en tu navegador. Ningún archivo sale de tu dispositivo.</div>
+  </div>
+
+  <div id="resultados">
+    <section>
+      <h2>Artistas más escuchados</h2>
+      <div class="tabla-wrap"><table id="t-artistas"></table></div>
+    </section>
+    <section>
+      <h2>Canciones más escuchadas</h2>
+      <div class="tabla-wrap"><table id="t-canciones"></table></div>
+    </section>
+    <section>
+      <h2>Minutos por año</h2>
+      <div class="tabla-wrap"><table id="t-anios"></table></div>
+    </section>
+    <section>
+      <div class="fila-anio">
+        <h2>Top 10 de un año</h2>
+        <select id="sel-anio" aria-label="Año"></select>
+      </div>
+      <div class="dos-col">
+        <div><h3>Artistas</h3><div class="tabla-wrap"><table id="t-artistas-anio"></table></div></div>
+        <div><h3>Canciones</h3><div class="tabla-wrap"><table id="t-canciones-anio"></table></div></div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+"use strict";
+
+const MS_MINIMO = 30 * 1000;   // menos de 30 s no cuenta
+const LIMITE = 10;
+const SIN_ANIO = "Sin año";
+let datos = null;
+
+const $ = (id) => document.getElementById(id);
+
+function extraerAnio(nombre) {
+  const m = nombre.match(/(?:19|20)\d{2}/);
+  return m ? m[0] : SIN_ANIO;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+const fmtMin = (ms) =>
+  (ms / 60000).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function sumar(mapa, clave, ms) {
+  mapa.set(clave, (mapa.get(clave) || 0) + ms);
+}
+
+function ordenar(mapa) {
+  return [...mapa.entries()].sort((a, b) => b[1] - a[1]);
+}
+
+function setEstado(msg, error = false) {
+  const el = $("estado");
+  el.textContent = msg;
+  el.classList.toggle("error", error);
+}
+
+async function procesar(lista) {
+  const archivos = [...lista].filter((f) => /\.(json|txt)$/i.test(f.name));
+  if (!archivos.length) {
+    setEstado("No se encontraron archivos .json o .txt.", true);
+    return;
+  }
+  setEstado("Procesando " + archivos.length + " archivo(s)…");
+
+  const porArtista = new Map();
+  const porCancion = new Map();      // "artista\u0000cancion" -> ms
+  const porAnio = new Map();
+  const porArtistaAnio = new Map();  // anio -> Map(artista -> ms)
+  const porCancionAnio = new Map();  // anio -> Map("artista\u0000cancion" -> ms)
+  let validos = 0;
+
+  for (const archivo of archivos) {
+    let reproducciones;
+    try {
+      reproducciones = JSON.parse(await archivo.text());
+    } catch (e) {
+      continue; // formato inválido: se ignora
+    }
+    if (!Array.isArray(reproducciones)) continue;
+    const anio = extraerAnio(archivo.name);
+
+    for (const r of reproducciones) {
+      const ms = r.ms_played || 0;
+      if (ms < MS_MINIMO) continue;
+      const artista = r.master_metadata_album_artist_name;
+      const cancion = r.master_metadata_track_name;
+      validos++;
+
+      sumar(porAnio, anio, ms);
+
+      if (artista) {
+        sumar(porArtista, artista, ms);
+        if (!porArtistaAnio.has(anio)) porArtistaAnio.set(anio, new Map());
+        sumar(porArtistaAnio.get(anio), artista, ms);
+      }
+      if (cancion) {
+        const clave = (artista || "Artista desconocido") + "\u0000" + cancion;
+        sumar(porCancion, clave, ms);
+        if (!porCancionAnio.has(anio)) porCancionAnio.set(anio, new Map());
+        sumar(porCancionAnio.get(anio), clave, ms);
+      }
+    }
+  }
+
+  if (!validos) {
+    setEstado("No se encontraron reproducciones válidas en estos archivos.", true);
+    return;
+  }
+
+  datos = { porArtista, porCancion, porAnio, porArtistaAnio, porCancionAnio };
+  setEstado(validos.toLocaleString("es-AR") + " reproducciones analizadas (de más de 30 segundos).");
+  mostrar();
+}
+
+function tabla(el, columnas, filas, pie) {
+  if (!filas.length) {
+    el.innerHTML = '<tbody><tr><td class="vacio">Sin datos.</td></tr></tbody>';
+    return;
+  }
+  const head = "<thead><tr>" + columnas.map((c) =>
+    `<th class="${c.cls || ""}">${esc(c.titulo)}</th>`).join("") + "</tr></thead>";
+  const body = "<tbody>" + filas.map((f) =>
+    "<tr>" + f.map((v, i) => `<td class="${columnas[i].cls || ""}">${esc(v)}</td>`).join("") + "</tr>"
+  ).join("") + "</tbody>";
+  const foot = pie
+    ? "<tfoot><tr>" + pie.map((v, i) => `<td class="${columnas[i].cls || ""}">${esc(v)}</td>`).join("") + "</tr></tfoot>"
+    : "";
+  el.innerHTML = head + body + foot;
+}
+
+function separar(clave) {
+  const [artista, cancion] = clave.split("\u0000");
+  return [cancion, artista];
+}
+
+function mostrar() {
+  const { porArtista, porCancion, porAnio } = datos;
+
+  tabla($("t-artistas"),
+    [{ titulo: "#", cls: "pos" }, { titulo: "Artista" }, { titulo: "Minutos", cls: "num" }],
+    ordenar(porArtista).slice(0, LIMITE).map(([a, ms], i) => [i + 1, a, fmtMin(ms)]));
+
+  tabla($("t-canciones"),
+    [{ titulo: "#", cls: "pos" }, { titulo: "Canción" }, { titulo: "Artista" }, { titulo: "Minutos", cls: "num" }],
+    ordenar(porCancion).slice(0, LIMITE).map(([k, ms], i) => [i + 1, ...separar(k), fmtMin(ms)]));
+
+  const anios = [...porAnio.keys()].sort((a, b) =>
+    (a === SIN_ANIO) - (b === SIN_ANIO) || a.localeCompare(b));
+  const total = [...porAnio.values()].reduce((s, v) => s + v, 0);
+  tabla($("t-anios"),
+    [{ titulo: "Año" }, { titulo: "Minutos", cls: "num" }],
+    anios.map((a) => [a, fmtMin(porAnio.get(a))]),
+    ["TOTAL", fmtMin(total)]);
+
+  const sel = $("sel-anio");
+  sel.innerHTML = anios.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join("");
+  sel.value = anios[anios.length - (anios[anios.length - 1] === SIN_ANIO && anios.length > 1 ? 2 : 1)];
+  mostrarAnio();
+
+  $("resultados").style.display = "block";
+  $("resultados").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function mostrarAnio() {
+  const anio = $("sel-anio").value;
+  const artistas = datos.porArtistaAnio.get(anio) || new Map();
+  const canciones = datos.porCancionAnio.get(anio) || new Map();
+
+  tabla($("t-artistas-anio"),
+    [{ titulo: "#", cls: "pos" }, { titulo: "Artista" }, { titulo: "Minutos", cls: "num" }],
+    ordenar(artistas).slice(0, LIMITE).map(([a, ms], i) => [i + 1, a, fmtMin(ms)]));
+
+  tabla($("t-canciones-anio"),
+    [{ titulo: "#", cls: "pos" }, { titulo: "Canción" }, { titulo: "Artista" }, { titulo: "Minutos", cls: "num" }],
+    ordenar(canciones).slice(0, LIMITE).map(([k, ms], i) => [i + 1, ...separar(k), fmtMin(ms)]));
+}
+
+$("sel-anio").addEventListener("change", mostrarAnio);
+$("archivos").addEventListener("change", (e) => procesar(e.target.files));
+$("carpeta").addEventListener("change", (e) => procesar(e.target.files));
+
+const drop = $("drop");
+["dragenter", "dragover"].forEach((ev) =>
+  drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((ev) =>
+  drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", (e) => procesar(e.dataTransfer.files));
+</script>
+</body>
+</html>
